@@ -129,7 +129,14 @@ class Neo4jAdapter(KGAdapter):
                 f"MATCH (n:{label}) WHERE n.{prop_name} IS NOT NULL "
                 f"RETURN DISTINCT n.{prop_name} AS value"
             )
-            return [r["value"] for r in rows if r.get("value") is not None]
+            # flatten list-valued properties into their distinct elements
+            values = []
+            for r in rows:
+                value = r.get("value")
+                for v in value if isinstance(value, list) else [value]:
+                    if v is not None and v not in values:
+                        values.append(v)
+            return values
         except Exception as e:
             logger.warning(f"[Neo4jAdapter] get_distinct_property_values failed for {entity_type}.{prop_name}: {e}")
             return []
@@ -205,7 +212,8 @@ def get_property_grounding_config(entity_type: str, prop_name: str, schema: dict
     """Derive whether a property is in scope for value grounding, from its declared schema type."""
     prop_type = (schema.get(entity_type, {}).get("properties", {}) or {}).get(prop_name)
     return {
-        "is_categorical_candidate": prop_type == "str",
+        # str[] properties (e.g. tags or provenance lists) are grounded per element
+        "is_categorical_candidate": prop_type in ("str", "str[]"),
     }
 
 

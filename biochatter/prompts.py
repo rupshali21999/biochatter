@@ -136,6 +136,21 @@ class BioCypherPromptEngine:
                 relationship["target"] = [sentencecase_to_pascalcase(t) for t in relationship["target"]]
         return relationship
 
+    def _describe(self, names: list) -> str:
+        """Return the schema `description` of each named entity/relationship
+        that has one, as a prompt fragment with a leading space (empty string
+        if none do).
+        """
+        schema = {**self.entities, **self.relationships}
+        descriptions = [
+            f"{name}: {schema[name]['description'].rstrip('.')}"
+            for name in names
+            if isinstance(schema.get(name), dict) and schema[name].get("description")
+        ]
+        if not descriptions:
+            return ""
+        return " Descriptions: " + "; ".join(descriptions) + "."
+
     def _query_llm(self, conversation: Conversation, text: str, step: str) -> str:
         """Run an LLM query and attach prompt-engine step context to failures."""
         try:
@@ -230,7 +245,8 @@ class BioCypherPromptEngine:
             f"the user's question. "
             f"You can use the following entities: {entities}, "
             f"relationships: {list(relationships.keys())}, and "
-            f"properties: {properties}. "
+            f"properties: {properties}."
+            f"{self._describe(self.selected_entities + self.selected_relationships)} "
         )
 
         for relationship, values in relationships.items():
@@ -377,7 +393,8 @@ class BioCypherPromptEngine:
 
         conversation.append_system_message(
             "You have access to a knowledge graph that contains "
-            f"these entity types: {', '.join(self.entities)}. Your task is "
+            f"these entity types: {', '.join(self.entities)}."
+            f"{self._describe(list(self.entities))} Your task is "
             "to select the entity types that are relevant to the user's question "
             "for subsequent use in a query. For each relevant entity type, also "
             "identify whether the question mentions a specific named instance of "
@@ -516,8 +533,10 @@ class BioCypherPromptEngine:
                     if pair[0] in self.selected_entities or pair[1] in self.selected_entities:
                         selected_rels.append((key, pair))
 
+            candidates = list(dict.fromkeys(key for key, _ in selected_rels))
             rels = json.dumps(selected_rels)
         else:
+            candidates = list(self.relationships)
             rels = json.dumps(self.relationships)
 
         msg = (
@@ -529,6 +548,7 @@ class BioCypherPromptEngine:
             "comma-separated, and without any additional text. Here are the "
             "possible relationships and their source and target entities: "
             f"{rels}."
+            f"{self._describe(candidates)}"
         )
 
         conversation.append_system_message(msg)
